@@ -3,17 +3,113 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
+<title>Sunshore City — Rico Vega</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23ffd34d'/%3E%3C/svg%3E">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.min.js" } }
+</script>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1420; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #f2f4f6; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
   #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .hidden { display: none !important; }
+  /* --- HUD --- */
+  #hud { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 5; }
+  #minimapWrap { position: absolute; top: 14px; left: 14px; border: 2px solid rgba(255,255,255,0.55); border-radius: 8px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.5); }
+  #minimap { display: block; width: 180px; height: 180px; }
+  #stats { position: absolute; top: 58px; right: 16px; text-align: right; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+  #cash { font-size: 28px; font-weight: 800; color: #7dff9a; }
+  #stars { font-size: 26px; letter-spacing: 2px; color: #ffd34d; }
+  #stars.hot { animation: pulse 0.8s infinite alternate; }
+  @keyframes pulse { from { opacity: 1; } to { opacity: 0.55; } }
+  #healthBar { width: 190px; height: 12px; margin: 6px 0 4px auto; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; overflow: hidden; }
+  #healthFill { height: 100%; width: 100%; background: #37c978; }
+  #healthFill.low { background: #e5484d; }
+  #ammo { font-size: 18px; font-weight: 700; }
+  #objective { position: absolute; left: 14px; bottom: 118px; max-width: 560px; font-size: 17px; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,0.9); background: rgba(0,0,0,0.35); padding: 6px 10px; border-radius: 6px; border-left: 4px solid #ffd34d; }
+  #timer { position: absolute; left: 14px; bottom: 168px; font-size: 22px; font-weight: 800; color: #ffd34d; text-shadow: 0 1px 4px rgba(0,0,0,0.9); display: none; }
+  #feed { position: absolute; left: 14px; bottom: 14px; font-size: 14px; line-height: 1.5; text-shadow: 0 1px 3px rgba(0,0,0,0.9); white-space: pre-line; }
+  #speedo { position: absolute; right: 18px; bottom: 16px; font-size: 30px; font-weight: 800; text-shadow: 0 2px 5px rgba(0,0,0,0.9); display: none; }
+  #hint { position: absolute; right: 16px; bottom: 64px; font-size: 12px; text-align: right; opacity: 0.75; text-shadow: 0 1px 3px rgba(0,0,0,0.9); }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; display: none; }
+  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: rgba(255,255,255,0.9); box-shadow: 0 0 3px #000; }
+  #crosshair::before { left: 8px; top: 0; width: 2px; height: 18px; }
+  #crosshair::after { top: 8px; left: 0; width: 18px; height: 2px; }
+  #banner { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; display: none; }
+  #bannerTitle { font-size: 40px; font-weight: 900; letter-spacing: 1px; text-shadow: 0 3px 10px rgba(0,0,0,0.9); color: #ffd34d; }
+  #bannerSub { font-size: 17px; text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
+  #damage { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(200,20,20,0.55) 100%); opacity: 0; z-index: 6; }
+  /* --- Menus --- */
+  .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; z-index: 10; background: linear-gradient(180deg, rgba(8,20,40,0.55) 0%, rgba(8,20,40,0.85) 100%); }
+  .screen h1 { font-size: 56px; margin: 0 0 4px; letter-spacing: 2px; color: #ffd34d; text-shadow: 0 4px 18px rgba(0,0,0,0.8); }
+  .screen h2 { font-size: 20px; margin: 0 0 18px; font-weight: 500; color: #cfe3f5; }
+  .screen p { max-width: 620px; font-size: 16px; line-height: 1.55; color: #e8eef4; margin: 6px 0; }
+  .screen .controls { font-size: 14px; color: #b9c8d8; }
+  .screen button { pointer-events: auto; margin: 10px 6px 0; padding: 12px 28px; font-size: 17px; font-weight: 700; border: none; border-radius: 8px; background: #ffd34d; color: #1a1405; cursor: pointer; box-shadow: 0 3px 12px rgba(0,0,0,0.5); }
+  .screen button:hover { background: #ffe08a; }
+  .screen button.secondary { background: rgba(255,255,255,0.16); color: #fff; }
+  #muteBtn { position: fixed; top: 14px; right: 16px; z-index: 11; pointer-events: auto; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
+<canvas id="game" aria-label="Sunshore City: an open-world crime game. Drive, steal cars, run missions, and lose the police."></canvas>
 <p id="status" role="status" aria-live="polite"></p>
+
+<div id="hud">
+  <div id="minimapWrap"><canvas id="minimap" width="180" height="180"></canvas></div>
+  <div id="stats">
+    <div id="cash">$0</div>
+    <div id="stars">☆☆☆☆☆</div>
+    <div id="healthBar"><div id="healthFill"></div></div>
+    <div id="ammo"></div>
+  </div>
+  <div id="objective"></div>
+  <div id="timer"></div>
+  <div id="feed"></div>
+  <div id="speedo"><span id="speed">0 km/h</span></div>
+  <div id="hint">WASD move · Shift run · Space jump · E enter car · F punch · Click shoot · R reload<br>Drag mouse to look · N next mission · P pause · M mute</div>
+  <div id="crosshair"></div>
+  <div id="banner"><div id="bannerTitle"></div><div id="bannerSub"></div></div>
+</div>
+<div id="damage"></div>
+
+<div id="titleScreen" class="screen" style="display:flex">
+  <h1>SUNSHORE CITY</h1>
+  <h2>An open-world crime story — starring Rico Vega</h2>
+  <p>Rico Vega came back to Sunshore City with nothing but a driver’s licence and a debt.
+     Mama Delia runs the pier, and she has work for a wheelman who asks no questions.
+     Five jobs. One big score. Don’t get caught.</p>
+  <p class="controls">WASD move · Shift run · Space jump · E enter / steal a car · F punch<br>
+     Mouse: drag to look, click to shoot · R reload · N start next mission · P pause · M mute</p>
+  <div>
+    <button id="startBtn">Start the story</button>
+    <button id="continueBtn" class="secondary">Continue saved game</button>
+  </div>
+  <p class="controls">Progress saves in this browser. Steal cars, outrun the police, finish all five missions.</p>
+</div>
+
+<div id="pauseScreen" class="screen">
+  <h1>Paused</h1>
+  <p>Sunshore City waits for no one — except right now.</p>
+  <div><button id="resumeBtn">Resume</button></div>
+  <p class="controls">WASD move · E enter car · Click shoot · R reload · M mute</p>
+</div>
+
+<div id="overScreen" class="screen">
+  <h1>Wasted</h1>
+  <p>Rico didn’t make it. The city keeps moving without him.</p>
+  <p id="overStats"></p>
+  <div><button id="restartBtn">Try again</button></div>
+</div>
+
+<div id="bustedScreen" class="screen">
+  <h1>Busted</h1>
+  <p>The Sunshore police finally put the cuffs on Rico. Mama Delia will bail him out — for a price.</p>
+  <p id="bustedStats"></p>
+  <div><button id="bustedBtn">Get out and go again</button></div>
+</div>
+
+<button id="muteBtn">🔊 Mute (M)</button>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

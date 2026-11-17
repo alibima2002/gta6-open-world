@@ -1,124 +1,145 @@
-// The game's rules and state, with no drawing and no browser in it: the player's paddle, the
-// pool of falling blocks and coins, spawning, collisions, score, lives and level. step() advances
-// one fixed step and returns what happened as bit flags, so the caller can react without the
-// world knowing about screens or sound. Nothing here allocates after createWorld returns.
-import { BLOCK, COIN, FIELD, LEVEL, LIVES, PLAYER, POOL_SIZE } from './config.js';
+// The game's shared state and the collision rules, with no drawing in it: every
+// subsystem reads and writes this one object, so the loop stays the only coordinator.
+import { CITY, PLAYER, WANTED } from './config.js';
+import { createRandom } from './random.js';
 
-export const KIND_BLOCK = 0;
-export const KIND_COIN = 1;
+export const SCREEN_TITLE = 'title';
+export const SCREEN_PLAY = 'play';
+export const SCREEN_PAUSED = 'paused';
+export const SCREEN_OVER = 'over';
+export const SCREEN_BUSTED = 'busted';
 
-export const EVENT_HIT = 1;
-export const EVENT_COIN = 2;
-export const EVENT_OVER = 4;
+export function createWorld(seed) {
+  const rng = createRandom(seed);
+  const state = {
+    rng,
+    seed,
+    time: 0,
+    screen: SCREEN_TITLE,
+    // Rico Vega on foot.
+    player: {
+      x: 0, y: 0, z: 30,
+      vx: 0, vz: 0, vy: 0,
+      heading: 0, // facing, radians; 0 = -Z
+      onGround: true,
+      health: PLAYER.health,
+      ammo: 12,
+      reloading: 0,
+      inCar: null, // the car object when driving
+      punchCooldown: 0,
+      shootCooldown: 0,
+      hurtFlash: 0,
+      invulnerable: 0,
+    },
+    cash: 0,
+    heat: 0,
+    stars: 0,
+    kills: 0,
+    carsStolen: 0,
+    missionIndex: 0, // next mission to play
+    missionsDone: 0,
+    // The city builder fills these in.
+    colliders: [], // {minX,maxX,minZ,maxZ}
+    buildings: [], // {x,z,w,d,h} for the minimap
+    roadLines: [], // road centre positions, for the minimap
+    spawnPoints: [], // {x,z} parking spots
+    // Live actors, filled by their managers.
+    cars: [], // every drivable car: {group, x,z,heading,speed,steer,kind,color,parked,traffic,police,health}
+    peds: [], // {group,x,z,heading,speed,state,panic}
+    police: [], // {car, officer} pursuit units
+    officers: [], // foot police {group,x,z,heading,arrest}
+    enemies: [], // gang members {group,x,z,heading,health,shootTimer,alive}
+    particles: [],
+    tracers: [],
+    skidMarks: [],
+    // Camera orbit (mouse drag) and shake.
+    camYaw: 0,
+    camPitch: 0.32,
+    shake: 0,
+    // Mission runtime.
+    mission: null, // {def, step, timer, target:{x,z}, marker, ...}
+    marker: null, // {x,z,label} or null
+    messageLog: [], // {text, t}
+    banner: null, // {title, sub, t}
+    muted: false,
+  };
 
-function overlaps(a, b) {
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
-}
-
-export function createWorld(random) {
-  const player = { x: 0, y: FIELD.groundY - PLAYER.height, width: PLAYER.width, height: PLAYER.height, invulnerable: 0 };
-  const items = [];
-  for (let index = 0; index < POOL_SIZE; index += 1) {
-    items.push({ active: false, kind: KIND_BLOCK, x: 0, y: 0, width: 0, height: 0, speed: 0 });
+  function addCollider(minX, maxX, minZ, maxZ) {
+    state.colliders.push({ minX, maxX, minZ, maxZ });
   }
-  const state = { player, items, score: 0, lives: LIVES, level: 1, elapsed: 0, blockTimer: 0, coinTimer: 0 };
 
-  function reset() {
-    player.x = (FIELD.width - player.width) / 2;
-    player.invulnerable = 0;
-    for (const item of items) item.active = false;
-    state.score = 0;
-    state.lives = LIVES;
-    state.level = 1;
-    state.elapsed = 0;
-    state.blockTimer = BLOCK.interval;
-    state.coinTimer = COIN.interval;
-  }
-
-  function freeItem() {
-    for (let index = 0; index < items.length; index += 1) if (!items[index].active) return items[index];
-    return null;
-  }
-
-  function spawnBlock() {
-    const item = freeItem();
-    if (item === null) return;
-    item.active = true;
-    item.kind = KIND_BLOCK;
-    item.width = BLOCK.minWidth + random() * (BLOCK.maxWidth - BLOCK.minWidth);
-    item.height = BLOCK.height;
-    item.x = random() * (FIELD.width - item.width);
-    item.y = -item.height;
-    item.speed = BLOCK.speed + BLOCK.speedPerLevel * (state.level - 1) + random() * BLOCK.speedJitter;
-  }
-
-  function spawnCoin() {
-    const item = freeItem();
-    if (item === null) return;
-    item.active = true;
-    item.kind = KIND_COIN;
-    item.width = COIN.size;
-    item.height = COIN.size;
-    item.x = random() * (FIELD.width - item.width);
-    item.y = -item.height;
-    item.speed = COIN.speed + COIN.speedPerLevel * (state.level - 1);
-  }
-
-  function blockInterval() {
-    return Math.max(BLOCK.minInterval, BLOCK.interval * BLOCK.intervalScale ** (state.level - 1));
-  }
-
-  /**
-   * One fixed step. `direction` is -1, 0 or 1 (left, still, right). With `harmless` set (the title
-   * screen's backdrop) things fall but nothing touches the player and nothing scores.
-   */
-  function step(dt, direction, harmless) {
-    let events = 0;
-    state.elapsed += dt;
-    state.level = Math.min(LEVEL.max, 1 + Math.floor(state.elapsed / LEVEL.seconds));
-
-    player.x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * dt));
-    if (player.invulnerable > 0) player.invulnerable = Math.max(0, player.invulnerable - dt);
-
-    state.blockTimer -= dt;
-    if (state.blockTimer <= 0) {
-      spawnBlock();
-      state.blockTimer += blockInterval();
-    }
-    state.coinTimer -= dt;
-    if (state.coinTimer <= 0) {
-      spawnCoin();
-      state.coinTimer += COIN.interval + random() * COIN.intervalJitter;
-    }
-
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      item.y += item.speed * dt;
-      if (item.y > FIELD.groundY) {
-        item.active = false;
-        if (item.kind === KIND_BLOCK && !harmless) state.score += BLOCK.dodgePoints;
-        continue;
+  // Push a circle (x,z,radius) out of every building AABB it overlaps. Returns true
+  // when a push happened, so callers can play a bump sound or lose speed.
+  function resolveCircle(pos, radius) {
+    let pushed = false;
+    for (const c of state.colliders) {
+      const nx = Math.max(c.minX, Math.min(pos.x, c.maxX));
+      const nz = Math.max(c.minZ, Math.min(pos.z, c.maxZ));
+      const dx = pos.x - nx;
+      const dz = pos.z - nz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= radius * radius) continue;
+      if (d2 > 1e-8) {
+        const d = Math.sqrt(d2);
+        const push = (radius - d) / d;
+        pos.x += dx * push;
+        pos.z += dz * push;
+      } else {
+        // Centre inside the box: push out along the smallest penetration axis.
+        const pl = pos.x - c.minX;
+        const pr = c.maxX - pos.x;
+        const pt = pos.z - c.minZ;
+        const pb = c.maxZ - pos.z;
+        const m = Math.min(pl, pr, pt, pb);
+        if (m === pl) pos.x = c.minX - radius;
+        else if (m === pr) pos.x = c.maxX + radius;
+        else if (m === pt) pos.z = c.minZ - radius;
+        else pos.z = c.maxZ + radius;
       }
-      if (harmless || !overlaps(item, player)) continue;
-      if (item.kind === KIND_COIN) {
-        item.active = false;
-        state.score += COIN.points;
-        events |= EVENT_COIN;
-      } else if (player.invulnerable === 0) {
-        item.active = false;
-        state.lives -= 1;
-        player.invulnerable = PLAYER.invulnerable;
-        events |= EVENT_HIT;
-        if (state.lives === 0) {
-          events |= EVENT_OVER;
-          break;
-        }
-      }
+      pushed = true;
     }
-    return events;
+    return pushed;
   }
 
-  reset();
-  return { state, reset, step };
+  // Water is a wall everywhere except the causeway corridor (and the island).
+  function inWater(x, z) {
+    if (z < CITY.waterZ) return false;
+    if (Math.abs(x) <= CITY.causewayHalf) return false; // the causeway
+    const dx = x;
+    const dz = z - CITY.islandZ;
+    if (dx * dx + dz * dz < (CITY.islandR + 2) * (CITY.islandR + 2)) return false;
+    return true;
+  }
+
+  function clampToGround(pos, radius) {
+    const half = CITY.half;
+    pos.x = Math.max(-half + radius, Math.min(half - radius, pos.x));
+    pos.z = Math.max(-half + radius, Math.min(half - radius, pos.z));
+    if (inWater(pos.x, pos.z)) {
+      // Shove back to the sand: the nearest dry point is straight back north.
+      pos.z = CITY.waterZ - radius - 0.5;
+    }
+  }
+
+  function addHeat(amount) {
+    state.heat = Math.min(5.5, state.heat + amount);
+    state.stars = state.heat < 0.5 ? 0 : Math.min(5, Math.floor(state.heat - 0.5) + 1);
+  }
+
+  function decayHeat(dt) {
+    if (state.heat <= 0) return;
+    state.heat = Math.max(0, state.heat - WANTED.decayPerSec * dt);
+    state.stars = state.heat < 0.5 ? 0 : Math.min(5, Math.floor(state.heat - 0.5) + 1);
+  }
+
+  function message(text) {
+    state.messageLog.push({ text, t: state.time });
+    if (state.messageLog.length > 5) state.messageLog.shift();
+  }
+
+  function showBanner(title, sub) {
+    state.banner = { title, sub, t: state.time };
+  }
+
+  return { state, addCollider, resolveCircle, inWater, clampToGround, addHeat, decayHeat, message, showBanner };
 }
