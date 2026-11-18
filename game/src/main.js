@@ -89,7 +89,7 @@ const traffic = createTraffic(state, scene, world, state.rng);
 const pedestrians = createPedestrians(state, scene, world, state.rng);
 const police = createPolice(state, scene, world, state.rng, fx);
 const combat = createCombat(state, scene, world, fx, audio);
-const missions = createMissions(state, scene, world, fx, combat, audio);
+const missions = createMissions(state, scene, world, fx, combat, audio, writeSave);
 const hud = createHud(state, els, audio);
 const minimap = createMinimap(els.minimap, state);
 

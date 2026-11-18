@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { CITY } from './config.js';
 import { pick, range } from './random.js';
+import { playerPos } from './playerPos.js';
 
 const SHIRTS = [0xe8632c, 0x2e6fc2, 0x7a2e4d, 0x2c7a4b, 0xd8a03a, 0x6b5ca8, 0xe8e4da, 0x3a3f46];
 const PED_COUNT = 22;
@@ -75,8 +76,8 @@ export function createPedestrians(state, scene, world, rng) {
   }
 
   function update(dt) {
-    const px = state.player.x;
-    const pz = state.player.z;
+    // Peds flee away from where Rico actually is — the car while driving.
+    const { x: px, z: pz } = playerPos(state);
     const playerCar = state.player.inCar;
     for (const ped of peds) {
       if (ped.panic > 0) ped.panic -= dt;

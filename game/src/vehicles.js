@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { CAR, CITY, COLOURS } from './config.js';
 import { pick, range } from './random.js';
+import { playerPos } from './playerPos.js';
 
 const TRAFFIC_COLOURS = [0xc23b2e, 0x2e6fc2, 0xe8e4da, 0x3a3f46, 0x7a2e4d, 0x2c7a4b, 0xd8a03a, 0x6b5ca8];
 const TRAFFIC_COUNT = 10;
@@ -207,8 +208,8 @@ export function createTraffic(state, scene, world, rng) {
   }
 
   function update(dt) {
-    const px = state.player.x;
-    const pz = state.player.z;
+    // Traffic respawns near where Rico actually is — the car while driving.
+    const { x: px, z: pz } = playerPos(state);
     for (const car of state.cars) {
       if (!car.traffic) continue;
       // Respawning far-away traffic near the player keeps the streets busy.

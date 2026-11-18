@@ -6,6 +6,7 @@ import { CAR, CITY } from './config.js';
 import { SCREEN_BUSTED } from './world.js';
 import { createCar } from './vehicles.js';
 import { range } from './random.js';
+import { playerPos } from './playerPos.js';
 
 const MAX_CRUISERS = 5;
 
@@ -38,11 +39,12 @@ export function createPolice(state, scene, world, rng, fx) {
   let sirenOn = false;
 
   function spawnCruiser() {
-    const p = state.player;
+    // Cruisers spawn around where Rico actually is — the car while driving.
+    const pos = playerPos(state);
     const angle = rng() * Math.PI * 2;
     const dist = range(rng, 55, 80);
-    const x = Math.max(-190, Math.min(190, p.x + Math.sin(angle) * dist));
-    const z = Math.max(-190, Math.min(190, p.z + Math.cos(angle) * dist));
+    const x = Math.max(-190, Math.min(190, pos.x + Math.sin(angle) * dist));
+    const z = Math.max(-190, Math.min(190, pos.z + Math.cos(angle) * dist));
     const car = createCar(state, scene, 'police', 0x1c2f6e, x, z, rng() * Math.PI * 2);
     car.police = true;
     car.parked = false;
@@ -59,7 +61,7 @@ export function createPolice(state, scene, world, rng, fx) {
     const z = p.z + Math.cos(angle) * 18;
     mesh.position.set(x, 0, z);
     scene.add(mesh);
-    const officer = { group: mesh, x, z, heading: 0, arrest: 0, phase: 0 };
+    const officer = { group: mesh, x, z, heading: 0, arrest: 0, phase: 0, health: 100, alive: true };
     mesh.userData.actorRef = { kind: 'officer', officer };
     state.officers.push(officer);
     return officer;
@@ -172,6 +174,7 @@ export function createPolice(state, scene, world, rng, fx) {
 
     // --- Foot officers: close in and hold Rico until he is busted ---
     for (const officer of state.officers) {
+      if (!officer.alive) continue; // downed officers stay down
       const dx = p.x - officer.x;
       const dz = p.z - officer.z;
       const dist = Math.hypot(dx, dz);

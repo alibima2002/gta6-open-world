@@ -1,7 +1,7 @@
 // Rico Vega on foot: a stylized low-poly person built from boxes, WASD movement
 // relative to the camera, running, jumping, punching, and getting in and out of cars.
 import * as THREE from 'three';
-import { CAR, PLAYER } from './config.js';
+import { CAR, COMBAT, PLAYER } from './config.js';
 
 export function createPlayerMesh() {
   const group = new THREE.Group();
@@ -105,10 +105,10 @@ export function createPlayer(state, scene, world, fx) {
     fx.punch();
     const fx0 = Math.sin(p.heading);
     const fz0 = Math.cos(p.heading);
-    // Hit the nearest enemy, ped or officer in front.
+    // Hit the nearest enemy, officer or ped in front.
     const targets = [
       ...state.enemies.filter((e) => e.alive),
-      ...state.officers,
+      ...state.officers.filter((o) => o.alive),
       ...state.peds,
     ];
     for (const t of targets) {
@@ -117,21 +117,41 @@ export function createPlayer(state, scene, world, fx) {
       const d = Math.hypot(dx, dz);
       if (d > 2.2) continue;
       if ((dx * fx0 + dz * fz0) / Math.max(d, 0.001) < 0.4) continue;
+      if (t.arrest !== undefined) {
+        // A police officer: punching one is assaulting an officer — heavy
+        // heat, real damage, and after enough hits he goes down.
+        t.health -= COMBAT.punchDamage;
+        fx.blood(t.x, 1.2, t.z);
+        world.addHeat(2.0);
+        if (t.health <= 0) {
+          t.alive = false;
+          t.group.rotation.x = -Math.PI / 2;
+          t.group.position.y = 0.4;
+          world.addHeat(1.5);
+          world.message('Officer down! Every unit in the city is coming.');
+        } else {
+          world.message('You punched a police officer! Witnesses called it in.');
+        }
+        return;
+      }
       if (t.health !== undefined) {
-        t.health -= 25;
+        t.health -= COMBAT.punchDamage;
         fx.blood(t.x, 1.2, t.z);
         if (t.health <= 0 && t.alive !== undefined) {
           t.alive = false;
+          // Fall exactly like the shooting path in combat.js.
+          t.group.rotation.x = -Math.PI / 2;
+          t.group.position.y = 0.4;
           world.addHeat(1.2);
           state.kills += 1;
         }
-      } else {
-        // A pedestrian: they panic and run; hitting one is a crime.
-        t.panic = 6;
-        t.state = 'flee';
-        world.addHeat(0.8);
-        world.message('You hit a pedestrian! Witnesses called the police.');
+        return;
       }
+      // A pedestrian: they panic and run; hitting one is a crime.
+      t.panic = 6;
+      t.state = 'flee';
+      world.addHeat(0.8);
+      world.message('You hit a pedestrian! Witnesses called the police.');
       return;
     }
   }

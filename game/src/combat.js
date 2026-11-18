@@ -2,6 +2,7 @@
 // punching is in player.js, and the rival gang members who shoot back.
 import * as THREE from 'three';
 import { COMBAT } from './config.js';
+import { playerPos } from './playerPos.js';
 
 const ENEMY_SHOOT_RANGE = 42;
 
@@ -82,7 +83,7 @@ export function createCombat(state, scene, world, fx, audio) {
     raycaster.far = 120;
     const targets = [];
     for (const e of state.enemies) if (e.alive) targets.push(e.group);
-    for (const o of state.officers) targets.push(o.group);
+    for (const o of state.officers) if (o.alive) targets.push(o.group);
     for (const ped of state.peds) targets.push(ped.group);
     for (const car of state.cars) targets.push(car.group);
     if (state.shootables) targets.push(...state.shootables);
@@ -108,8 +109,22 @@ export function createCombat(state, scene, world, fx, audio) {
           world.message('Gang member down.');
         }
       } else if (ref && ref.kind === 'officer') {
-        world.addHeat(1.5);
-        world.message('You shot a cop! Every unit in the city is coming.');
+        // Officers are damageable: each hit hurts, and enough hits put one down.
+        const officer = ref.officer;
+        if (officer.alive) {
+          officer.health -= COMBAT.pistolDamage;
+          fx.blood(officer.x, 1.3, officer.z);
+          world.addHeat(1.5);
+          if (officer.health <= 0) {
+            officer.alive = false;
+            officer.group.rotation.x = -Math.PI / 2;
+            officer.group.position.y = 0.4;
+            world.addHeat(1.5);
+            world.message('Officer down! Every unit in the city is coming.');
+          } else {
+            world.message('You shot a cop! Every unit in the city is coming.');
+          }
+        }
       } else if (ref && ref.kind === 'ped') {
         ref.ped.panic = 6;
         ref.ped.state = 'flee';
@@ -156,8 +171,10 @@ export function createCombat(state, scene, world, fx, audio) {
     // Gang members: close in to range, shoot with poor aim, fall when dead.
     for (const e of state.enemies) {
       if (!e.alive) continue;
-      const dx = p.x - e.x;
-      const dz = p.z - e.z;
+      // Aim at where Rico actually is — the car while driving.
+      const pos = playerPos(state);
+      const dx = pos.x - e.x;
+      const dz = pos.z - e.z;
       const dist = Math.hypot(dx, dz);
       const targetHeading = Math.atan2(dx, dz);
       let diff = targetHeading - e.heading;
@@ -179,17 +196,24 @@ export function createCombat(state, scene, world, fx, audio) {
           const from = { x: e.x, y: 1.3, z: e.z };
           // Poor aim: the further away, the more likely to miss.
           const hitChance = Math.max(0.12, 0.55 - dist * 0.01);
-          const to = Math.random() < hitChance
-            ? { x: p.x, y: p.y + 1.2, z: p.z }
-            : { x: p.x + (Math.random() - 0.5) * 4, y: p.y + 1.2, z: p.z + (Math.random() - 0.5) * 4 };
+          // One roll decides both the tracer and the damage: a tracer that
+          // shows a hit must hurt, and a miss must not.
+          const hit = Math.random() < hitChance;
+          const to = hit
+            ? { x: pos.x, y: p.y + 1.2, z: pos.z }
+            : { x: pos.x + (Math.random() - 0.5) * 4, y: p.y + 1.2, z: pos.z + (Math.random() - 0.5) * 4 };
           fx.tracer(from, to);
+          // Test hook (M1): the last enemy tracer, so a playtest can check
+          // the tracer and the damage agree. Read by tests only, never by
+          // the game itself.
+          state.lastEnemyTracer = { hit, x: to.x, y: to.y, z: to.z };
           fx.muzzle(from, { x: Math.sin(e.heading), y: 0, z: Math.cos(e.heading) });
-          if (Math.random() < hitChance && p.invulnerable <= 0 && !p.inCar) {
+          if (hit && p.invulnerable <= 0 && !p.inCar) {
             p.health -= 8;
             p.invulnerable = 0.4;
             p.hurtFlash = 0.4;
             state.shake = Math.max(state.shake, 0.4);
-          } else if (Math.random() < hitChance && p.inCar) {
+          } else if (hit && p.inCar) {
             p.inCar.health -= 6;
           }
         }

@@ -2,6 +2,8 @@
 // (go somewhere, steal a marked car, escape a tail, win a shootout); the beacon,
 // the HUD arrow and the minimap all point at the current target.
 import * as THREE from 'three';
+import { playerPos } from './playerPos.js';
+import { createCar } from './vehicles.js';
 
 // Mission start points and targets, on the city grid.
 export const MISSION_DEFS = [
@@ -75,14 +77,9 @@ function createBeacon(scene) {
   return group;
 }
 
-export function createMissions(state, scene, world, fx, combat, audio) {
+export function createMissions(state, scene, world, fx, combat, audio, onSave) {
   const beacon = createBeacon(scene);
   let targetCar = null;
-
-  function playerPos() {
-    const p = state.player;
-    return p.inCar ? { x: p.inCar.x, z: p.inCar.z } : { x: p.x, z: p.z };
-  }
 
   function setMarker(x, z, label) {
     state.marker = { x, z, label };
@@ -121,6 +118,11 @@ export function createMissions(state, scene, world, fx, combat, audio) {
         }
       }
       targetCar = best;
+      if (!targetCar) {
+        // Every lot car is already gone: park a fresh coupe on the lot so
+        // the step can always advance instead of soft-locking with no marker.
+        targetCar = createCar(state, scene, 'sedan', 0xd8a03a, 87, -87, Math.PI / 2);
+      }
       if (targetCar) {
         targetCar.group.userData.marked = true;
         setMarker(targetCar.x, targetCar.z, step.label);
@@ -148,6 +150,7 @@ export function createMissions(state, scene, world, fx, combat, audio) {
     world.message(def.brief);
     audio.chime();
     startStep(def.steps[0]);
+    if (onSave) onSave();
     return true;
   }
 
@@ -165,6 +168,8 @@ export function createMissions(state, scene, world, fx, combat, audio) {
     world.message(`Mission complete! +$${reward}`);
     audio.chime();
     fx.dust(state.player.x, state.player.z, 12);
+    // Save immediately: finishing a job must survive a tab close.
+    if (onSave) onSave();
   }
 
   function failMission(reason) {
@@ -198,7 +203,7 @@ export function createMissions(state, scene, world, fx, combat, audio) {
 
   function update(dt) {
     const m = state.mission;
-    const pos = playerPos();
+    const pos = playerPos(state);
     if (!m) {
       // Free roam: show the next mission's start marker.
       const def = currentDef();
